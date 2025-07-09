@@ -1,0 +1,477 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class LunarPhaseTest : MonoBehaviour
+{
+    [Header("UI References")]
+    public GameObject testPanel;
+    public Text questionText;
+    public Text scoreText;
+    public Text feedbackText;
+    public Button nextButton;
+    public Button submitButton;
+    public Button startTestButton;
+    public Image phaseImage;
+    public Slider progressSlider;
+
+    [Header("Moon and Earth References")]
+    public Transform moonTransform;
+    public Transform earthTransform;
+    public Speed_Control speedController;
+
+    [Header("Phase Images")]
+    public Sprite newMoonSprite;
+    public Sprite firstQuarterSprite;
+    public Sprite fullMoonSprite;
+    public Sprite thirdQuarterSprite;
+
+    [Header("Test Settings")]
+    public float testRadius = 10f; // Radius of moon's orbit
+
+    // Test data structure
+    [System.Serializable]
+    public class LunarPhaseQuestion
+    {
+        public string phaseName;
+        public Sprite phaseSprite;
+        public float correctAngle; // Angle in degrees where this phase occurs
+        public float studentAngle; // Student's chosen angle
+        public float angleDisplacement; // Calculated displacement
+    }
+
+    private List<LunarPhaseQuestion> questions = new List<LunarPhaseQuestion>();
+    private int currentQuestionIndex = 0;
+    private bool testInProgress = false;
+    private bool testCompleted = false;
+    private float totalDisplacement = 0f;
+    private string finalGrade = "";
+
+    void Start()
+    {
+        InitializeTest();
+        SetupUI();
+    }
+
+    void InitializeTest()
+    {
+        // Initialize the three lunar phase questions
+        questions.Clear();
+
+        // New Moon (Moon between Earth and Sun - angle 0°)
+        questions.Add(new LunarPhaseQuestion
+        {
+            phaseName = "New Moon",
+            phaseSprite = newMoonSprite,
+            correctAngle = 0f
+        });
+
+        // First Quarter (Moon 90° ahead of Earth-Sun line)
+        questions.Add(new LunarPhaseQuestion
+        {
+            phaseName = "First Quarter",
+            phaseSprite = firstQuarterSprite,
+            correctAngle = 90f
+        });
+
+        // Full Moon (Moon opposite to Sun - angle 180°)
+        questions.Add(new LunarPhaseQuestion
+        {
+            phaseName = "Full Moon",
+            phaseSprite = fullMoonSprite,
+            correctAngle = 180f
+        });
+
+        // Optional: Third Quarter (Moon 270° or -90°)
+        // questions.Add(new LunarPhaseQuestion
+        // {
+        //     phaseName = "Third Quarter",
+        //     phaseSprite = thirdQuarterSprite,
+        //     correctAngle = 270f
+        // });
+
+        // Shuffle questions for variety
+        ShuffleQuestions();
+    }
+
+    void ShuffleQuestions()
+    {
+        for (int i = 0; i < questions.Count; i++)
+        {
+            var temp = questions[i];
+            int randomIndex = Random.Range(i, questions.Count);
+            questions[i] = questions[randomIndex];
+            questions[randomIndex] = temp;
+        }
+    }
+
+    void SetupUI()
+    {
+        if (testPanel) testPanel.SetActive(false);
+
+        if (startTestButton)
+            startTestButton.onClick.AddListener(StartTest);
+
+        if (nextButton)
+        {
+            nextButton.onClick.AddListener(NextQuestion);
+            nextButton.gameObject.SetActive(false);
+        }
+
+        if (submitButton)
+        {
+            submitButton.onClick.AddListener(SubmitAnswer);
+            submitButton.gameObject.SetActive(false);
+        }
+
+        if (progressSlider)
+        {
+            progressSlider.minValue = 0;
+            progressSlider.maxValue = questions.Count;
+            progressSlider.value = 0;
+        }
+    }
+
+    public void StartTest()
+    {
+        testInProgress = true;
+        testCompleted = false;
+        currentQuestionIndex = 0;
+        totalDisplacement = 0f;
+
+        if (testPanel) testPanel.SetActive(true);
+        if (startTestButton) startTestButton.gameObject.SetActive(false);
+
+        // Pause the orbital system
+        if (speedController)
+        {
+            speedController.system_speed = 0f;
+        }
+
+        DisplayCurrentQuestion();
+    }
+
+    void DisplayCurrentQuestion()
+    {
+        if (currentQuestionIndex >= questions.Count)
+        {
+            CompleteTest();
+            return;
+        }
+
+        var currentQuestion = questions[currentQuestionIndex];
+
+        // Update UI
+        if (questionText)
+            questionText.text = $"Question {currentQuestionIndex + 1}: Position the moon where you would see a {currentQuestion.phaseName}";
+
+        if (phaseImage)
+            phaseImage.sprite = currentQuestion.phaseSprite;
+
+        if (progressSlider)
+            progressSlider.value = currentQuestionIndex;
+
+        if (feedbackText)
+            feedbackText.text = "Drag the moon to the correct position, then click Submit.";
+
+        // Show/hide buttons appropriately
+        if (submitButton) submitButton.gameObject.SetActive(true);
+        if (nextButton) nextButton.gameObject.SetActive(false);
+
+        // Enable moon dragging
+        EnableMoonDragging(true);
+    }
+
+    void EnableMoonDragging(bool enable)
+    {
+        // You'll need to implement moon dragging functionality
+        // This is a placeholder for the dragging system
+        var moonCollider = moonTransform.GetComponent<Collider>();
+        if (moonCollider)
+            moonCollider.enabled = enable;
+    }
+
+    public void SubmitAnswer()
+    {
+        if (currentQuestionIndex >= questions.Count) return;
+
+        var currentQuestion = questions[currentQuestionIndex];
+
+        // Calculate student's angle based on moon position
+        Vector3 moonPosition = moonTransform.position;
+        Vector3 earthPosition = earthTransform.position;
+        Vector3 direction = moonPosition - earthPosition;
+
+        // Calculate angle (assuming Earth is at origin, positive X is 0°)
+        float studentAngle = Mathf.Atan2(direction.z, direction.x) * Mathf.Rad2Deg;
+        if (studentAngle < 0) studentAngle += 360f; // Normalize to 0-360
+
+        currentQuestion.studentAngle = studentAngle;
+
+        // Calculate angle displacement
+        float displacement = CalculateAngleDisplacement(currentQuestion.correctAngle, studentAngle);
+        currentQuestion.angleDisplacement = displacement;
+
+        // Update total displacement
+        totalDisplacement += displacement;
+
+        // Show feedback
+        DisplayFeedback(currentQuestion);
+
+        // Disable moon dragging
+        EnableMoonDragging(false);
+
+        // Show next button, hide submit button
+        if (submitButton) submitButton.gameObject.SetActive(false);
+        if (nextButton) nextButton.gameObject.SetActive(true);
+    }
+
+    float CalculateAngleDisplacement(float correctAngle, float studentAngle)
+    {
+        float displacement = Mathf.Abs(correctAngle - studentAngle);
+
+        // Handle angle wrapping (e.g., 350° and 10° are only 20° apart)
+        if (displacement > 180f)
+            displacement = 360f - displacement;
+
+        return displacement;
+    }
+
+    void DisplayFeedback(LunarPhaseQuestion question)
+    {
+        string feedbackMessage = "";
+
+        if (question.angleDisplacement == 0f)
+        {
+            feedbackMessage = "Perfect! Your angle displacement is 0°.";
+        }
+        else if (question.angleDisplacement <= 15f)
+        {
+            feedbackMessage = $"Great! Your angle displacement is {question.angleDisplacement:F1}°.";
+        }
+        else if (question.angleDisplacement <= 30f)
+        {
+            feedbackMessage = $"Good! Your angle displacement is {question.angleDisplacement:F1}°.";
+        }
+        else if (question.angleDisplacement <= 45f)
+        {
+            feedbackMessage = $"Okay. Your angle displacement is {question.angleDisplacement:F1}°.";
+        }
+        else
+        {
+            feedbackMessage = $"Your angle displacement is {question.angleDisplacement:F1}°. Try to get closer next time!";
+        }
+
+        if (feedbackText)
+            feedbackText.text = feedbackMessage;
+    }
+
+    public void NextQuestion()
+    {
+        currentQuestionIndex++;
+        DisplayCurrentQuestion();
+    }
+
+    void CompleteTest()
+    {
+        testInProgress = false;
+        testCompleted = true;
+
+        // Calculate final grade
+        CalculateFinalGrade();
+
+        // Display final results
+        DisplayFinalResults();
+
+        // Re-enable orbital controls
+        if (speedController)
+        {
+            speedController.system_speed = 1f; // Or whatever default speed you want
+        }
+    }
+
+    void CalculateFinalGrade()
+    {
+        // Grading scale based on total displacement
+        if (totalDisplacement == 0f)
+        {
+            finalGrade = "A+ (Perfect!)";
+        }
+        else if (totalDisplacement <= 15f)
+        {
+            finalGrade = "A (Excellent)";
+        }
+        else if (totalDisplacement <= 30f)
+        {
+            finalGrade = "B (Good)";
+        }
+        else if (totalDisplacement <= 45f)
+        {
+            finalGrade = "C (Average)";
+        }
+        else if (totalDisplacement <= 60f)
+        {
+            finalGrade = "D (Below Average)";
+        }
+        else
+        {
+            finalGrade = "F (Needs Improvement)";
+        }
+    }
+
+    void DisplayFinalResults()
+    {
+        string resultsText = $"Test Complete!\n\n";
+        resultsText += $"Total Angle Displacement: {totalDisplacement:F1}°\n";
+        resultsText += $"Final Grade: {finalGrade}\n\n";
+
+        resultsText += "Question Results:\n";
+        for (int i = 0; i < questions.Count; i++)
+        {
+            var question = questions[i];
+            resultsText += $"{i + 1}. {question.phaseName}: {question.angleDisplacement:F1}°\n";
+        }
+
+        if (questionText)
+            questionText.text = resultsText;
+
+        if (phaseImage)
+            phaseImage.gameObject.SetActive(false);
+
+        if (feedbackText)
+            feedbackText.text = "Click 'Restart Test' to try again or exit to continue exploring.";
+
+        if (progressSlider)
+            progressSlider.value = questions.Count;
+
+        // Show restart button
+        if (startTestButton)
+        {
+            startTestButton.gameObject.SetActive(true);
+            startTestButton.GetComponentInChildren<Text>().text = "Restart Test";
+        }
+    }
+
+    // Method to position moon at specific angle (for testing)
+    public void SetMoonPosition(float angleInDegrees)
+    {
+        float angleInRadians = angleInDegrees * Mathf.Deg2Rad;
+        Vector3 earthPos = earthTransform.position;
+
+        float x = earthPos.x + testRadius * Mathf.Cos(angleInRadians);
+        float z = earthPos.z + testRadius * Mathf.Sin(angleInRadians);
+
+        moonTransform.position = new Vector3(x, moonTransform.position.y, z);
+    }
+
+    // Public method to start test from external scripts
+    public void BeginLunarPhaseTest()
+    {
+        StartTest();
+    }
+
+    // Get test results for external use
+    public TestResults GetTestResults()
+    {
+        return new TestResults
+        {
+            totalDisplacement = totalDisplacement,
+            grade = finalGrade,
+            questionResults = questions.ToArray(),
+            isCompleted = testCompleted
+        };
+    }
+
+    // DEBUG CODE - ADD THIS SECTION
+    void OnGUI()
+    {
+        if (testInProgress && currentQuestionIndex < questions.Count)
+        {
+            GUI.color = Color.yellow;
+            GUI.Label(new Rect(10, 10, 300, 20), $"Current Question: {currentQuestionIndex + 1}/{questions.Count}");
+            GUI.Label(new Rect(10, 30, 300, 20), $"Phase: {questions[currentQuestionIndex].phaseName}");
+            GUI.Label(new Rect(10, 50, 300, 20), $"Correct Angle: {questions[currentQuestionIndex].correctAngle:F1}°");
+            GUI.Label(new Rect(10, 70, 300, 20), $"Current Moon Angle: {GetCurrentMoonAngle():F1}°");
+            GUI.Label(new Rect(10, 90, 300, 20), $"Total Displacement: {totalDisplacement:F1}°");
+        }
+    }
+
+    float GetCurrentMoonAngle()
+    {
+        Vector3 direction = moonTransform.position - earthTransform.position;
+        float angle = Mathf.Atan2(direction.z, direction.x) * Mathf.Rad2Deg;
+        return angle < 0 ? angle + 360f : angle;
+    }
+    // END DEBUG CODE
+
+    [System.Serializable]
+    public class TestResults
+    {
+        public float totalDisplacement;
+        public string grade;
+        public LunarPhaseQuestion[] questionResults;
+        public bool isCompleted;
+    }
+}
+
+// Additional script for moon dragging functionality
+public class MoonDragger : MonoBehaviour
+{
+    public Transform earthTransform;
+    public float orbitRadius = 10f;
+    public LayerMask groundLayer = 1;
+
+    private Camera playerCamera;
+    private bool isDragging = false;
+    private LunarPhaseTest testManager;
+
+    void Start()
+    {
+        playerCamera = Camera.main;
+        testManager = FindObjectOfType<LunarPhaseTest>();
+    }
+
+    void Update()
+    {
+        if (isDragging)
+        {
+            DragMoon();
+        }
+    }
+
+    void OnMouseDown()
+    {
+        // Only allow dragging during test
+        if (testManager && testManager.testInProgress)
+        {
+            isDragging = true;
+        }
+    }
+
+    void OnMouseUp()
+    {
+        isDragging = false;
+    }
+
+    void DragMoon()
+    {
+        Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
+        RaycastHit hit;
+
+        if (Physics.Raycast(ray, out hit, Mathf.Infinity, groundLayer))
+        {
+            Vector3 earthPos = earthTransform.position;
+            Vector3 targetPos = hit.point;
+
+            // Calculate direction from Earth to target
+            Vector3 direction = (targetPos - earthPos).normalized;
+
+            // Position moon at orbit radius
+            Vector3 newPos = earthPos + direction * orbitRadius;
+            newPos.y = transform.position.y; // Maintain Y position
+
+            transform.position = newPos;
+        }
+    }
+}
